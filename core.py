@@ -191,7 +191,7 @@ class EvaluateFewShot(Callback):
             seen += y_pred.shape[0]
 
             totals['loss'] += loss.item() * y_pred.shape[0]
-            totals[self.metric_name] += categorical_accuracy(y, y_pred) * y_pred.shape[0]
+            #totals[self.metric_name] += categorical_accuracy(y, y_pred) * y_pred.shape[0]
 
         logs[self.prefix + 'loss'] = totals['loss'] / seen
-        logs[self.metric_name] = totals[self.metric_name] / seen
+        #logs[self.metric_name] = totals[self.metric_name] / seen

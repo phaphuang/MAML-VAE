@@ -24,12 +24,12 @@ def gradient_step(model: Module, optimiser: Optimizer, loss_fn: Callable, x: tor
     """
     model.train()
     optimiser.zero_grad()
-    y_pred = model(x)
-    loss = loss_fn(y_pred, y)
+    recon_x, mu, logvar = model(x)
+    loss, bce, kld = loss_fn(recon_x, x, mu, logvar)
     loss.backward()
     optimiser.step()
 
-    return loss, y_pred
+    return loss, recon_x
 
 
 def batch_metrics(model: Module, y_pred: torch.Tensor, y: torch.Tensor, metrics: List[Union[str, Callable]],
@@ -110,11 +110,13 @@ def fit(model: Module, optimiser: Optimizer, loss_fn: Callable, epochs: int, dat
 
             x, y = prepare_batch(batch)
 
-            loss, y_pred = fit_function(model, optimiser, loss_fn, x, y, **fit_function_kwargs)
+            #print(x.shape, y.shape)
+
+            loss, recon_x = fit_function(model, optimiser, loss_fn, x, y, **fit_function_kwargs)
             batch_logs['loss'] = loss.item()
 
             # Loops through all metrics
-            batch_logs = batch_metrics(model, y_pred, y, metrics, batch_logs)
+            #batch_logs = batch_metrics(model, y_pred, y, metrics, batch_logs)
 
             callbacks.on_batch_end(batch_index, batch_logs)
 

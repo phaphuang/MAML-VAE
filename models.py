@@ -18,7 +18,7 @@ class Flatten(nn.Module):
         return input.view(input.size(0), -1)
 
 class UnFlatten(nn.Module):
-    def forward(self, input, size=1024):
+    def forward(self, input, size=2048):
         return input.view(input.size(0), size, 1, 1)
 
 class GlobalMaxPool1d(nn.Module):
@@ -127,25 +127,24 @@ class VAE(nn.Module):
             Flatten()
         )
 
-        self.fc1 = nn.Linear(7 * 7 * 32, z_dim)
-        self.fc2 = nn.Linear(7 * 7 * 32, z_dim)
+        self.fc1 = nn.Linear(2048, z_dim)
+        self.fc2 = nn.Linear(2048, z_dim)
 
-        self.fc3 = nn.Linear(z_dim, 7 * 7 * 32)
+        self.fc3 = nn.Linear(z_dim, 2048)
 
         self.decoder = nn.Sequential(
             UnFlatten(),
-            nn.ConvTranspose2d(7 * 7 * 32, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True)
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True)
-            nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1),
+            nn.ConvTranspose2d(2048, 64, kernel_size=5, stride=2, padding=0),
             nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2, padding=0),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=0),
             nn.Sigmoid()
         )
     
     def reparameterize(self, mu, logvar):
         std = logvar.mul(0.5).exp_()
-        esp = torch.randn(*mu.size())
+        esp = torch.randn(*mu.size()).type(torch.cuda.DoubleTensor)
         z = mu + std * esp
         return z
     
@@ -165,7 +164,36 @@ class VAE(nn.Module):
         return z
     
     def forward(self, x):
-        z, mu, logvar = self.encode(x)
+        z, mu, logvar = self.encode(x.type(torch.cuda.DoubleTensor))
         z = self.decode(z)
+        return z, mu, logvar
+
+    def functional_encoder(self, x, weights):
+        x = F.relu(F.conv2d(x, weights['encoder.0.weight'], weights['encoder.0.bias'], stride=2, padding=1))
+        x = F.relu(F.conv2d(x, weights['encoder.2.weight'], weights['encoder.2.bias'], stride=2, padding=1))
+        x = F.relu(F.conv2d(x, weights['encoder.4.weight'], weights['encoder.4.bias'], stride=2, padding=1))
+
+        x = x.view(x.size(0), -1)
+
+        mu = F.linear(x, weights['fc1.weight'], weights['fc1.bias'])
+        logvar = F.linear(x, weights['fc2.weight'], weights['fc2.bias'])
+        z = self.reparameterize(mu, logvar)
+        
+        return z, mu, logvar
+    
+    def functional_decoder(self, z, weights):
+        x = F.linear(z, weights['fc3.weight'], weights['fc3.bias'])
+        x = x.view(z.size(0), 2048, 1, 1)
+        x = F.relu(F.conv_transpose2d(x, weights['decoder.1.weight'], weights['decoder.1.bias'], stride=2, padding=0))
+        x = F.relu(F.conv_transpose2d(x, weights['decoder.3.weight'], weights['decoder.3.bias'], stride=2, padding=0))
+        x = F.conv_transpose2d(x, weights['decoder.5.weight'], weights['decoder.5.bias'], stride=2, padding=0)
+
+        z = torch.sigmoid(x)
+        
+        return z
+    
+    def functional_forward(self, x, weights):
+        z, mu, logvar = self.functional_encoder(x, weights)
+        z = self.functional_decoder(z, weights)
         return z, mu, logvar
 

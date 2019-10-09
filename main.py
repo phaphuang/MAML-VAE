@@ -5,7 +5,7 @@ import torch
 
 from datasets import OmniglotDataset, MiniImageNet
 from core import NShotTaskSampler, create_nshot_task_label, EvaluateFewShot
-from models import FewShotClassifier
+from models import VAE
 from maml import meta_gradient_step
 from train import fit
 from callbacks import *
@@ -13,6 +13,7 @@ from utils import setup_dirs
 from config import PATH
 
 import torch.nn.functional as F
+from torchsummary import summary
 
 setup_dirs()
 assert torch.cuda.is_available()
@@ -74,9 +75,17 @@ evaluation_taskloader = DataLoader(
 # Training #
 ############
 print(f'Training MAML on {args.dataset}...')
-meta_model = FewShotClassifier(num_input_channels, args.k, fc_layer_size).to(device, dtype=torch.double)
+meta_model = VAE(in_channels=num_input_channels, input_size=28, z_dim=16).to(device, dtype=torch.double)
 meta_optimiser = torch.optim.Adam(meta_model.parameters(), lr=args.meta_lr)
-loss_fn = nn.CrossEntropyLoss().to(device)
+
+print([x for x, y in meta_model.named_parameters()])
+print(summary(meta_model, (1, 28, 28)))
+
+def loss_fn(recon_x, x, mu, logvar):
+    #print(recon_x.shape, x.shape)
+    BCE = F.binary_cross_entropy(recon_x, x)
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD, BCE, KLD
 
 def prepare_meta_batch(n, k, q, meta_batch_size):
     def prepare_meta_batch_(batch):

@@ -67,8 +67,10 @@ def meta_gradient_step(model: Module,
         for inner_batch in range(inner_train_steps):
             # Perform update of model weights
             y = create_nshot_task_label(k_way, n_shot).to(device)
-            logits = model.functional_forward(x_task_train, fast_weights)
-            loss = loss_fn(logits, y)
+            #logits = model.functional_forward(x_task_train, fast_weights)
+            #loss = loss_fn(logits, y)
+            recon_x, mu, logvar = model.functional_forward(x_task_train, fast_weights)
+            loss, bce, kld = loss_fn(recon_x, x_task_train, mu, logvar)
             gradients = torch.autograd.grad(loss, fast_weights.values(), create_graph=create_graph)
 
             # Update weights manually
@@ -79,13 +81,15 @@ def meta_gradient_step(model: Module,
 
         # Do a pass of the model on the validation data from the current task
         y = create_nshot_task_label(k_way, q_queries).to(device)
-        logits = model.functional_forward(x_task_val, fast_weights)
-        loss = loss_fn(logits, y)
+        #logits = model.functional_forward(x_task_val, fast_weights)
+        #loss = loss_fn(logits, y)
+        recon_x, mu, logvar = model.functional_forward(x_task_val, fast_weights)
+        loss, bce, kld = loss_fn(recon_x, x_task_val, mu, logvar)
         loss.backward(retain_graph=True)
 
         # Get post-update accuracies
-        y_pred = logits.softmax(dim=1)
-        task_predictions.append(y_pred)
+        #y_pred = logits.softmax(dim=1)
+        #task_predictions.append(y_pred)
 
         # Accumulate losses and gradients
         task_losses.append(loss)
@@ -107,15 +111,16 @@ def meta_gradient_step(model: Module,
             optimiser.zero_grad()
             # Dummy pass in order to create `loss` variable
             # Replace dummy gradients with mean task gradients using hooks
-            logits = model(torch.zeros((k_way, ) + data_shape).to(device, dtype=torch.double))
-            loss = loss_fn(logits, create_nshot_task_label(k_way, 1).to(device))
+            temp = torch.zeros((k_way, ) + data_shape).to(device, dtype=torch.double)
+            recon_x, mu, logvar = model(temp)
+            loss, bce, kld = loss_fn(recon_x, temp, mu, logvar)
             loss.backward()
             optimiser.step()
 
             for h in hooks:
                 h.remove()
 
-        return torch.stack(task_losses).mean(), torch.cat(task_predictions)
+        return torch.stack(task_losses).mean(), recon_x
 
     elif order == 2:
         model.train()
@@ -126,6 +131,6 @@ def meta_gradient_step(model: Module,
             meta_batch_loss.backward()
             optimiser.step()
 
-        return meta_batch_loss, torch.cat(task_predictions)
+        return meta_batch_loss, recon_x
     else:
         raise ValueError('Order must be either 1 or 2.')
